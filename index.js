@@ -3,90 +3,63 @@ var express = require('express'),
 var bodyParser = require('body-parser');
 var MongoClient = require('mongodb').MongoClient;
 var assert = require('assert');
-var url = 'mongodb://localhost:27017/devnotes';
+
+var mongourl = process.env.MONGO_URL || 'mongodb://localhost:27017/devnotes';
+var collection;
+MongoClient.connect(mongourl, function(err, db) {
+  collection = db.collection('devnotes');
+});
 
 app.use(bodyParser.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
-app.listen(5000, function(){
-  console.log('App listening on port 5000!');
+var port = process.env.PORT || 3000;
+app.listen(port, function(){
+  console.log('App listening on port ' + port);
 });
 
 /**
  * Listens for GET requests from extention
  */
-app.get('/', function (req, res) {
-  if ('url' in req.headers) { //verify url was sent
-    getNotes(req.headers, res)
-  } else if ('url' in req.query) { //check backup location incase its being wierd
-    getNotes(req.query, res)
-  }
+app.get('/page/:urlhash', function (req, res) {
+  console.log(req.params);
+  assert.ok(req.params.urlhash);
+  collection.find({
+    "urlhash": req.params.urlhash
+  }).toArray(function(err, result){
+    console.log(result);
+    res.send(result); // return results
+  });
 });
 
 /**
  * Listens for POST requests from extention
  */
-app.post('/', function (req, res) {
-  if (req.body.api == 'post') { //check if insert/update
-    setNotes(req.body, res);
-  } else if (req.body.api == 'delete') { //check if delete
-    killNotes(req.body, res);
-  }
+app.put('/page/:urlhash/note/:noteid', function (req, res) {
+  collection.update({
+    urlhash: req.params.urlhash,
+    timestamp: req.params.noteid
+  }, {
+    urlhash: req.params.urlhash,
+    timestamp: req.params.noteid,
+    top: req.body.top,
+    left: req.body.left,
+    text: req.body.text
+  }, {
+    upsert: true
+  }, function(err, count, result) {
+    assert.equal(err, null);
+    res.send({success: true});
+  });
 });
 
-/**
- * Gets notes from DB and sends to extention
- */
-var getNotes = function(data, res) {
-  MongoClient.connect(url, function(err, db) {
-    var cursor = db.collection('devnotes').find({
-      "url": data.url
-    }).toArray(function(err, result){
-      res.send(result); // return results
-    });
-    console.log("Retrived devnotes for " + data.url); //log action in terminal
+app.delete('/page/:urlhash/note/:noteid', function(req, res) {
+  collection.deleteOne({
+    urlhash: req.params.urlhash,
+    timestamp: req.params.noteid
+  }, function(err, results) {
+    assert.equal(err, results);
+    res.send({success: true});
   });
-}
+});
 
-/**
- * Insert or update note in DB
- */
-var setNotes = function(data, res) {
-  MongoClient.connect(url, function(err, db) {
-    assert.equal(null, err);
-    db.collection('devnotes').update(
-      {
-        "id" : data.id
-      },
-      {
-        "id" : data.id,
-        "topval" : data.top,
-        "leftval" : data.left,
-        "textval" : data.text,
-        "url" : data.url,
-      },
-      {
-        "upsert" : true
-      }, function(err, count, result) {
-         assert.equal(err, null);
-         console.log("Saved a devnote"); //log action in terminal
-         res.send("saved"); //send response to extention
-      }
-    );
-  });
-}
-
-/**
- * Delete Note from DB
- */
-var killNotes = function(data, res) {
-  MongoClient.connect(url, function(err, db) {
-    db.collection('devnotes').deleteOne({
-      "id": data.id
-    }, function(err, results) {
-       assert.equal(err, null);
-       console.log("Deleted a devnote"); //log action in terminal
-       res.send("deleted"); //send response to extention
-    });
-  });
-}
